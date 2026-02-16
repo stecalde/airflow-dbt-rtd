@@ -101,9 +101,14 @@ class DbtGitFSHook(SSHHook, DbtFSHook):
 
 
         ts = dt.datetime.now(dt.timezone.utc)
-        repo.do_commit(
-            self.commit_msg.format(ts=ts).encode(), self.commit_author.encode()
-        )
+        try:
+            repo.do_commit(
+                self.commit_msg.format(ts=ts).encode(), self.commit_author.encode()
+            )
+        except AttributeError:
+            repo.get_worktree().commit(
+                self.commit_msg.format(ts=ts).encode(), self.commit_author.encode()
+            )
 
         selected_refs = []
         remote_changed_refs = {}
