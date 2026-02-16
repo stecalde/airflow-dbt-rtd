@@ -210,8 +210,16 @@ class DbtGitFSHook(SSHHook, DbtFSHook):
             if url.port:
                 base_url = f"{base_url}:{url.port}"
 
+            conn = self.get_connection(self.git_conn_id) if self.git_conn_id else None
             auth_params = {}
-            if url.authentication.username and url.authentication.password:
+            
+            if conn and conn.login and conn.password:
+                auth_params = {
+                    "username": conn.login,
+                    "password": conn.password,
+                }
+                base_url = f"{url.scheme}://{base_url}"
+            elif url.authentication.username and url.authentication.password:
                 auth_params = {
                     "username": url.authentication.username,
                     "password": url.authentication.password,
@@ -219,10 +227,12 @@ class DbtGitFSHook(SSHHook, DbtFSHook):
                 base_url = f"{url.scheme}://{base_url}"
             elif url.authentication.username:
                 base_url = f"{url.scheme}://{url.authentication.username}@{base_url}"
+            else:
+                base_url = f"{url.scheme}://{base_url}"
 
             client = HttpGitClient(base_url, **auth_params)  # type: ignore
 
-            path = str(url.path)
+            path = str(url.path).lstrip("/")
 
         else:
             raise ValueError(f"Unsupported scheme: {url.scheme}")
