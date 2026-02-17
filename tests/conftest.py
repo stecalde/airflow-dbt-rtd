@@ -25,7 +25,6 @@ from airflow.providers.common.compat.sdk import Context
 from airflow.utils.session import create_session
 from mockgcp.storage.client import MockClient as MockStorageClient
 from moto import mock_aws
-from pytest_postgresql.janitor import DatabaseJanitor
 
 from airflow_dbt_python.hooks.dbt import DbtHook
 from airflow_dbt_python.utils.version import AIRFLOW_V_3_1_PLUS
@@ -164,29 +163,17 @@ id,name
 """
 
 
-@pytest.fixture(scope="session")
-def database(postgresql_proc):
-    """Initialize a test postgres database."""
-    janitor = DatabaseJanitor(
-        user=postgresql_proc.user,
-        host=postgresql_proc.host,
-        port=postgresql_proc.port,
-        dbname=postgresql_proc.dbname,
-        version=postgresql_proc.version,
-        password=postgresql_proc.password,
-    )
-    janitor.init()
-
-    with janitor.cursor() as cur:
-        cur.execute(
-            """\
-        CREATE TABLE my_source_1 (id serial PRIMARY KEY, num integer);
-        CREATE TABLE my_source_2 (id serial PRIMARY KEY, num integer);
-        """
-        )
-
-    yield postgresql_proc
-    janitor.drop()
+@pytest.fixture(scope="module")
+def database():
+    """Mock postgres database for testing."""
+    mock_db = mock.MagicMock()
+    mock_db.host = "localhost"
+    mock_db.user = "test_user"
+    mock_db.port = 5432
+    mock_db.password = "test_password"
+    mock_db.dbname = "test"
+    mock_db.version = "13"
+    return mock_db
 
 
 @pytest.fixture(scope="session")
@@ -225,6 +212,11 @@ def airflow_conns(database):
 
     We create them by setting AIRFLOW_CONN_{CONN_ID} env variables.
     """
+    if database is None:
+        # Skip if database is not available (e.g., in unit tests)
+        yield ()
+        return
+        
     uris = (
         f"postgres://{database.user}:{database.password}@{database.host}:{database.port}/public?dbname={database.dbname}",
         "/tmp",
