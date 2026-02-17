@@ -118,6 +118,12 @@ class DbtBaseOperator(BaseOperator):
             dbt project back to.
         replace_on_upload: Flag to allow replacing files when uploading dbt project
             back to project_dir.
+        upload_to_different_destination: Upload the dbt project to a different destination
+            than the original project_dir.
+        upload_specific_artifacts: List of specific files/paths to upload (relative to
+            dbt project root). If None, uploads entire project.
+        destination_conn_id: Airflow connection ID to use for the upload destination.
+            If None, uses project_conn_id.
         env_vars: Supply environment variables to the project
     """
 
@@ -190,6 +196,9 @@ class DbtBaseOperator(BaseOperator):
         upload_dbt_project: bool = False,
         delete_before_upload: bool = False,
         replace_on_upload: bool = False,
+        upload_to_different_destination: Optional[Union[str, Path]] = None,
+        upload_specific_artifacts: Optional[list[Union[str, Path]]] = None,
+        destination_conn_id: Optional[str] = None,
         env_vars: Optional[Dict[str, Any]] = None,
         **kwargs,
     ) -> None:
@@ -268,6 +277,9 @@ class DbtBaseOperator(BaseOperator):
         self.upload_dbt_project = upload_dbt_project
         self.delete_before_upload = delete_before_upload
         self.replace_on_upload = replace_on_upload
+        self.upload_to_different_destination = upload_to_different_destination
+        self.upload_specific_artifacts = upload_specific_artifacts
+        self.destination_conn_id = destination_conn_id
         self.env_vars = env_vars
 
         self._dbt_hook: Optional[DbtHook] = None

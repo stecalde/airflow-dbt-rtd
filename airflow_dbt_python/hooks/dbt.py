@@ -153,6 +153,7 @@ class DbtHook(ABC, LoggingMixin):
         destination: URLLike,
         replace: bool = False,
         delete_before: bool = False,
+        conn_id: Optional[str] = None,
     ) -> None:
         """Push a dbt project from a given project_dir.
 
@@ -160,11 +161,63 @@ class DbtHook(ABC, LoggingMixin):
         supported for remotes that require it.
         """
         scheme = urlparse(str(destination)).scheme
-        fs_hook = self.get_fs_hook(scheme, self.project_conn_id)
+        fs_hook = self.get_fs_hook(scheme, conn_id or self.project_conn_id)
 
         return fs_hook.upload_dbt_project(
             project_dir, destination, replace=replace, delete_before=delete_before
         )
+
+    def upload_specific_dbt_artifacts(
+        self,
+        project_dir: URLLike,
+        destination: URLLike,
+        artifacts: list[URLLike],
+        replace: bool = False,
+        delete_before: bool = False,
+        conn_id: Optional[str] = None,
+    ) -> None:
+        """Upload specific artifacts from a dbt project.
+
+        Args:
+            project_dir: Local directory containing the dbt project.
+            destination: Remote destination for the artifacts.
+            artifacts: List of file paths relative to project_dir to upload.
+            replace: Whether to replace existing files.
+            delete_before: Whether to delete destination before uploading.
+            conn_id: Airflow connection ID to use for the destination.
+        """
+        from airflow_dbt_python.utils.url import URL
+
+        scheme = urlparse(str(destination)).scheme
+        fs_hook = self.get_fs_hook(scheme, conn_id or self.project_conn_id)
+
+        project_url = URL(project_dir)
+        destination_url = URL(destination)
+
+        if delete_before:
+            # Delete entire destination before uploading
+            fs_hook.upload_dbt_project(
+                project_dir, destination, replace=True, delete_before=True
+            )
+            # After deleting, we'll upload only the specific artifacts
+
+        for artifact in artifacts:
+            artifact_path = project_url / str(artifact)
+            if not artifact_path.exists():
+                self.log.warning(
+                    "Artifact %s not found in project directory %s",
+                    artifact,
+                    project_dir,
+                )
+                continue
+
+            dest_artifact = destination_url / str(artifact)
+            fs_hook._upload(
+                artifact_path,
+                dest_artifact,
+                replace=replace,
+                delete_before=False,
+            )
 
     def run_dbt_task(
         self,
@@ -172,6 +225,9 @@ class DbtHook(ABC, LoggingMixin):
         upload_dbt_project: bool = False,
         delete_before_upload: bool = False,
         replace_on_upload: bool = False,
+        upload_to_different_destination: Optional[URLLike] = None,
+        upload_specific_artifacts: Optional[list[URLLike]] = None,
+        destination_conn_id: Optional[str] = None,
         artifacts: Optional[Iterable[str]] = None,
         env_vars: Optional[Dict[str, Any]] = None,
         write_perf_info: bool = False,
@@ -205,6 +261,9 @@ class DbtHook(ABC, LoggingMixin):
             upload_dbt_project=upload_dbt_project,
             delete_before_upload=delete_before_upload,
             replace_on_upload=replace_on_upload,
+            upload_to_different_destination=upload_to_different_destination,
+            upload_specific_artifacts=upload_specific_artifacts,
+            destination_conn_id=destination_conn_id,
             env_vars=env_vars,
         ) as dbt_dir:
             # When creating tasks via from_args, dbt switches to the project directory.
@@ -265,6 +324,9 @@ class DbtHook(ABC, LoggingMixin):
         upload_dbt_project: bool = False,
         delete_before_upload: bool = False,
         replace_on_upload: bool = False,
+        upload_to_different_destination: Optional[URLLike] = None,
+        upload_specific_artifacts: Optional[list[URLLike]] = None,
+        destination_conn_id: Optional[str] = None,
         env_vars: Optional[Dict[str, Any]] = None,
     ) -> Iterator[str]:
         """Provides a temporary directory to execute dbt.
@@ -311,13 +373,33 @@ class DbtHook(ABC, LoggingMixin):
                 yield tmp_dir
 
                 if upload_dbt_project is True:
-                    self.log.info("Uploading dbt project to: %s", store_project_dir)
-                    self.upload_dbt_project(
-                        tmp_dir,
-                        store_project_dir,
-                        replace=replace_on_upload,
-                        delete_before=delete_before_upload,
+                    upload_destination = (
+                        upload_to_different_destination
+                        if upload_to_different_destination
+                        else store_project_dir
                     )
+                    # Use destination_conn_id if provided, otherwise use project_conn_id
+                    conn_id = destination_conn_id if destination_conn_id else self.project_conn_id
+                    
+                    self.log.info("Uploading dbt project to: %s", upload_destination)
+                    
+                    if upload_specific_artifacts:
+                        self.upload_specific_dbt_artifacts(
+                            tmp_dir,
+                            upload_destination,
+                            upload_specific_artifacts,
+                            replace=replace_on_upload,
+                            delete_before=delete_before_upload,
+                            conn_id=conn_id,
+                        )
+                    else:
+                        self.upload_dbt_project(
+                            tmp_dir,
+                            upload_destination,
+                            replace=replace_on_upload,
+                            delete_before=delete_before_upload,
+                            conn_id=conn_id,
+                        )
 
         config.profiles_dir = store_profiles_dir
         config.project_dir = store_project_dir
